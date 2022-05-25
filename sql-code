@@ -1,0 +1,249 @@
+USE master;
+GO
+IF DB_ID (N'BethesdaCarRental2') IS NOT NULL
+	DROP DATABASE BethesdaCarRental2;
+GO
+CREATE DATABASE BethesdaCarRental2;
+GO
+USE BethesdaCarRental2;
+GO
+
+CREATE TABLE Employees
+(
+	EmployeeId		INT IDENTITY(1, 1),
+	EmployeeNumber  NVARCHAR(10)	NOT NULL,
+	FirstName		NVARCHAR(20),
+	LastName		NVARCHAR(20)	NOT NULL,
+	EmployeeTitle	NVARCHAR(100),
+	CONSTRAINT PK_Employees PRIMARY KEY(EmployeeId)
+);
+GO
+
+CREATE TABLE Categories
+(
+	CategoryId	INT IDENTITY(1, 1),
+	Category	NVARCHAR(25) NOT NULL,
+	Daily		DECIMAL(6, 2) NOT NULL,
+	Weekly		DECIMAL(6, 2) NOT NULL,
+	Monthly		DECIMAL(6, 2) NOT NULL,
+	Weekend		DECIMAL(6, 2) NOT NULL,
+	CONSTRAINT PK_Categoris PRIMARY KEY(CategoryId)
+);
+GO
+
+CREATE TABLE Cars
+(
+	CarId			INT IDENTITY(1, 1),
+	TagNumber		NVARCHAR(10)	NOT NULL,
+	Make			NVARCHAR(20)	NOT NULL,
+	Model			NVARCHAR(50),
+	Color			NVARCHAR(20),
+	Passengers		INT				NOT NULL,
+	CategoryId		INT				NOT NULL,
+	Condition		NVARCHAR(20),
+	[Availability]	NVARCHAR(100),
+	CONSTRAINT FK_Categories FOREIGN KEY(CategoryId) REFERENCES Categories(CategoryId),
+	CONSTRAINT PK_Cars PRIMARY KEY(CarId)
+);
+GO
+
+/* When a customer wants to rent a car, an employee of the company must process the rental order.
+   After using a car, when a customer brings it back, an employee must process the rental return.
+   In some cases, the employee who processes the rental returns may be different from the employee
+   who processed the start rental. For this reason, we will create two foreign keys from the same 
+   Employees table. */
+CREATE TABLE RentalOrders
+(
+	RentalOrderId			INT IDENTITY(1, 1),
+	ReceiptNumber			INT				NOT NULL,
+	RentalStartEmployeeId	INT				NOT NULL,
+	RentalReturnEmployeeId	INT,
+	CustomerDrvLicNumber	NVARCHAR(20)	NOT NULL,
+	CustomerName			NVARCHAR(50)	NOT NULL,
+	CustomerAddress			NVARCHAR(120),
+	CustomerCity			NVARCHAR(50),
+	CustomerState			NVARCHAR(40),
+	CustomerZIPCode			NVARCHAR(20),
+	CarId					INT				NOT NULL,
+	VehicleCondition		NVARCHAR(40)	NOT NULL,
+	TankLevel				NVARCHAR(20)	NOT NULL,
+	MileageStart			INT				NOT NULL,
+	MileageEnd				INT,
+	TotalMileage			INT,
+	RentStartDate			DATE			NOT NULL,
+	RentReturnDate			DATE,
+	TotalDays				INT,
+	RateApplied				DECIMAL(8, 2)	NOT NULL,
+	SubTotal				DECIMAL(8, 2),
+	TaxRate					DECIMAL(6, 2),
+	TaxAmount				DECIMAL(6, 2),
+	OrderTotal				DECIMAL(8, 2),
+	OrderStatus				NVARCHAR(50)	NOT NULL,
+	CONSTRAINT FK_RentalStartEmployees FOREIGN KEY(RentalStartEmployeeId) REFERENCES Employees(EmployeeId),
+	CONSTRAINT FK_RentalReturnEmployees FOREIGN KEY(RentalReturnEmployeeId) REFERENCES Employees(EmployeeId),
+	CONSTRAINT FK_Cars FOREIGN KEY(CarId) REFERENCES Cars(CarId),
+	CONSTRAINT PK_RentalOrders PRIMARY KEY(RentalOrderId)
+);
+GO
+-------------------------------------------------------------------------------------------------------
+CREATE VIEW RentStarts 
+AS
+	SELECT ro.ReceiptNumber, 
+		   staff.EmployeeNumber + N' - ' + staff.FirstName + N' ' + staff.LastName + N' (' + staff.EmployeeTitle + N')' AS N'Rent Processor',
+		   ro.CustomerDrvLicNumber, ro.CustomerName, ro.CustomerAddress, ro.CustomerCity, ro.CustomerState,
+		   ro.CustomerZIPCode, ro.CarId, ro.VehicleCondition, ro.TankLevel, ro.MileageStart, ro.RentStartDate, ro.RateApplied, ro.OrderStatus
+	FROM RentalOrders ro
+		   INNER JOIN Employees staff ON staff.EmployeeId = ro.RentalStartEmployeeId;
+GO
+
+CREATE VIEW RentalsCompleted
+AS
+	SELECT ro.ReceiptNumber AS N'Receipt #', 
+		   rentStart.EmployeeNumber + N' - ' + rentStart.FirstName + N' ' + rentStart.LastName + N' (' + rentStart.EmployeeTitle + N')' AS N'Rent Start Processor',
+		   rentEnd.EmployeeNumber + N' - ' + rentEnd.FirstName + N' ' + rentEnd.LastName + N' (' + rentEnd.EmployeeTitle + N')' AS N'Rent Return Processed By',
+		   ro.CustomerDrvLicNumber AS N'Customer Drv. Lic. #', ro.CustomerName AS N'Full Name', 
+		   ro.CustomerAddress AS N'Address', ro.CustomerCity AS N'City', ro.CustomerState AS N'State', ro.CustomerZIPCode AS N'ZIP Code',
+		   car.TagNumber + N' - ' + Make + N' ' + Model AS N'Vehicle Rented', ro.VehicleCondition AS N'Condition', ro.TankLevel AS N'Tank',
+		   ro.MileageStart AS N'Mileage Start', ro.MileageEnd AS N'End Mileage', ro.TotalMileage AS N'Total',
+		   ro.RentStartDate AS N'Started On', ro.RentReturnDate AS N'Ended On', ro.TotalDays AS N'Days',
+		   ro.RateApplied AS N'Rate', ro.SubTotal AS N'Sub-Total', ro.TaxRate AS N'Tax Rate', ro.TaxAmount AS N'Tax Amt',
+		   ro.OrderTotal AS N'Order Total',	ro.OrderStatus AS N'Order Status'
+	FROM RentalOrders ro
+		   INNER JOIN Employees rentStart ON rentStart.EmployeeId = ro.RentalStartEmployeeId
+		   INNER JOIN Employees rentEnd ON rentEnd.EmployeeId = ro.RentalReturnEmployeeId
+		   INNER JOIN Cars car ON ro.CarId = car.CarId;
+GO
+-------------------------------------------------------------------------------------------------------
+CREATE PROCEDURE GetRentalProcessor
+	@emplNbr NVARCHAR(10)
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	SELECT FirstName + N' ' + LastName + N' (' + EmployeeTitle + N')' 
+	FROM Employees
+	WHERE EmployeeNumber = @emplNbr;
+END
+GO
+
+CREATE PROCEDURE UpdateRentalOrder
+	@emplId INT, @condition NVARCHAR(40), @tank NVARCHAR(20), @mileEnd INT, @allMiles INT, 
+	@returnDate DATE, @days INT, @rentRate DECIMAL(8, 2), @subTotal DECIMAL(8, 2), @taxRate DECIMAL(6, 2),
+	@taxAmount DECIMAL(6, 2), @orderTotal DECIMAL(8, 2), @orderStatus NVARCHAR(50),
+	@rentNbr NVARCHAR(10)
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	UPDATE RentalOrders	
+	SET RentalReturnEmployeeId = @emplId,
+		VehicleCondition       = @condition,
+		TankLevel              = @tank,
+		MileageEnd             = @mileEnd,
+		TotalMileage           = @allMiles,
+		RentReturnDate         = @returnDate,
+		TotalDays              = @days,
+		RateApplied			   = @rentRate,
+		SubTotal               = @subTotal,
+		TaxRate                = @taxRate,
+		TaxAmount			   = @taxAmount,
+		OrderTotal             = @orderTotal,
+		OrderStatus			   = @orderStatus
+		WHERE ReceiptNumber    = @rentNbr;
+END
+GO
+--================================================================================
+INSERT INTO Employees(EmployeeNumber, FirstName, LastName, EmployeeTitle)
+VALUES(N'92735', N'Jeffrey',  N'Leucart',   N'General Manager'),
+	  (N'29268', N'Kathleen', N'Rawley',    N'Technician'),
+	  (N'73948', N'Allison',  N'Garlow',    N'Accounts Associates'),
+	  (N'40508', N'David',    N'Stillson',  N'Accounts Manager'),
+	  (N'24793', N'Michelle', N'Taylor',    N'Accounts Associates'),
+	  (N'20480', N'Peter',    N'Futterman', N'Accounts Associates'),
+	  (N'72084', N'Georgia',  N'Rosen',     N'Customer Service Representative'),
+	  (N'38240', N'Karen',    N'Blakney',   N'Accounts Associates');
+GO
+
+INSERT INTO Categories(Category, Daily, Weekly, Monthly, Weekend)
+VALUES(N'Economy',       34.95, 28.75, 24.95, 24.95),
+	  (N'Compact',       38.95, 32.75, 28.95, 28.95),
+	  (N'Standard',      45.95, 39.75, 35.95, 34.95),
+	  (N'Full Size',     50.00, 45.00, 42.55, 38.95),
+	  (N'Mini Van',      55.00, 50.00, 44.95, 42.95),
+	  (N'SUV',           56.95, 52.95, 44.95, 42.95),
+	  (N'Pickup Truck',  62.95, 52.75, 46.95, 44.95),
+	  (N'Passenger Van', 69.95, 64.75, 52.75, 49.95);
+GO
+
+INSERT INTO Cars(TagNumber, Make, Model, Color, Passengers, CategoryId, Condition, [Availability])
+VALUES(N'8AL8033', N'Toyota',    N'Corolla LE',           N'White',            5, 2, N'Excellent',    N'Available'),	--  1
+      (N'4AF9284', N'Ford',      N'F-150 Reg Cap 4X4',    N'Dark Green',       4, 7, N'Other',        N'Available'),	--  2
+      (N'6AP2749', N'Toyota',    N'Corolla LE',           N'Metallic Brown',   5, 2, N'Excellent',    N'Rented'),	--  3
+      (N'2MD8382', N'Toyota',    N'4Runner',              N'Red Metallic',     5, 6, N'Needs Repair', N'Available'),	--  4
+      (N'VGT927',  N'GMC',       N'Sierra 1500',          N'Dark Gray',        5, 7, N'Excellent',    N'Available'),	--  5
+      (N'3AD9283', N'Toyota',    N'Yaris',                N'Gray',             5, 1, N'Good',         N'Rented'),	--  6
+      (N'8AE9294', N'Lincoln',   N'MKT 3.5L',             N'Red',              5, 4, N'Excellent',    N'Available'),	--  7
+      (N'KLT840',  N'Ford',      N'E-350 XL',             N'Black',           15, 8, N'Excellent',    N'Available'),	--  8
+      (N'2AM9952', N'Ford',      N'Fiesta SE',            N'Blue',             5, 1, N'Good',         N'Available'),	--  9
+      (N'2AT9274', N'Ford',	     N'Focus SF',			  N'Black',		       5, 2, N'Excellent',    N'Available'),	-- 10
+      (N'6AD8274', N'Mazda',     N'CX-9',                 N'Dark Gray',        5, 5, N'Driveable',    N'Available'),	-- 11
+      (N'ADG279',  N'GMC',       N'Acadia SLE',           N'Black',            5, 6, N'Excellent',    N'Rented'),	-- 12
+      (N'1AD8049', N'Dodge',     N'Charger',              N'Blue',             5, 3, N'Excellent',    N'Available'),	-- 13
+      (N'9MD3974', N'Toyota',    N'Sienna LE FWD',        N'Red Metallic',     8, 8, N'Needs Repair', N'Rented'),	-- 14
+      (N'5AJ9274', N'BMW',       N'528i',                 N'Black Metallic',   5, 4, N'Excellent',    N'Available'),	-- 15
+      (N'GTH295',  N'Kia',       N'Rio EX',               N'Silver Metallic',  5, 1, N'Other',        N'Available'),	-- 16
+      (N'8AT2408', N'Mazda',     N'Miata MX-5',           N'Red Metallic',     2, 2, N'Driveable',    N'Available'),	-- 17
+      (N'6AP2486', N'Fiat',      N'500',                  N'Light Blue',       4, 1, N'Excellent',    N'Available'),	-- 18
+      (N'2AL9485', N'Chrysler',  N'200',                  N'Silver Metallic',  2, 2, N'Excellent',    N'Available'),	-- 19
+      (N'DFP924',  N'Honda',     N'Odyssey',              N'Gray',             8, 8, N'Needs Repair', N'Available'),	-- 20
+      (N'KER204',  N'Ford',      N'Focus RS',             N'Silver Metallic',  5, 2, N'Good',         N'Needs Repair'),	-- 21
+      (N'8AR9374', N'Honda',     N'Accord LX',            N'Blue',             5, 3, N'Other',        N'Rented'),	-- 22
+      (N'5MD2084', N'Buick',     N'Enclave',              N'Cream',            5, 5, N'Excellent',    N'Available'),	-- 23
+      (N'BND927',  N'Nissan',    N'Leaf',                 N'Red',              5, 1, N'Excellent',    N'Available'),	-- 24
+      (N'8AG3584', N'Chrysler',  N'Pacifica',             N'Blue Pearl',       8, 8, N'Driveable',    N'Available'),	-- 25
+      (N'8AL7394', N'Ford',      N'F-250 SD Reg Cab 4X4', N'Black',            5, 7, N'Good',         N'Available'),	-- 26
+      (N'4MD2840', N'Chevrolet', N'2500 LS',              N'Silver Metallic', 15, 8, N'Excellent',    N'Rented'),	-- 27
+      (N'G249580', N'Nissan',    N'Sentra SR',            N'Red Metallic',     5, 2, N'Excellent',    N'Available'),	-- 28
+      (N'3AK7397', N'Chrysler',  N'200',                  N'Silver Metallic',  2, 2, N'Driveable',    N'Available');	-- 29
+GO
+
+INSERT INTO RentalOrders(ReceiptNumber, RentalStartEmployeeId, CustomerDrvLicNumber, CustomerName, CustomerAddress, CustomerCity, CustomerState,
+						 CustomerZIPCode, CarId, VehicleCondition, TankLevel, MileageStart, RentStartDate, RateApplied, OrderStatus)
+VALUES(374683, 6, N'820-358-492',   N'Marcel buhler',      N'6800 Haxell Court',        N'Alexandria',   N'VA', N'22314', 20, N'Excellent', N'Empty',    12728, N'12/12/2022', 69.95, N'Rented - Vehicle With Customer'),
+	  (648842, 5, N'592-837-597',   N'Joan Altman',        N'3725 South Dakota Ave NW', N'Washington',   N'DC', N'20012',  2, N'Good',      N'1/2 Tank', 24715, N'12/12/2022', 62.95, N'Rented - Vehicle With Customer'),
+	  (147930, 8, N'379-708-358',   N'Thomas Filder',      N'4905 Herrenden Street',    N'Arlington',    N'VA', N'22204', 23, N'Good',      N'Empty',     6064, N'12/14/2022', 34.95, N'Rented - Vehicle With Customer'),
+	  (802808, 3, N'S-172-503-059', N'Gregory Strangeman', N'5530 Irving Street',       N'College Park', N'MD', N'20740', 10, N'Excellent', N'1/4 Tank',  8206, N'12/17/2022', 28.95, N'Rented - Vehicle With Customer'),
+	  (283649, 3, N'R-702-817-706', N'Michelle Russell',   N'10070 Weatherwood Drive',  N'Rockville',    N'MD', N'20853',  7, N'Excellent', N'Full',      3659, N'12/17/2022', 38.95, N'Rented - Vehicle With Customer');
+GO
+
+EXECUTE UpdateRentalOrder 5, N'Excellent',    N'1/2 Tank', 13022,	294, N'12/16/2022',	4,	69.95, 279.80,	7.75, 21.68, 301.48, N'Order Complete', 374683;
+GO
+EXECUTE UpdateRentalOrder 8, N'Good',         N'1/2 Tank', 25694,	979, N'12/17/2022',	5,	62.95, 314.75,	7.75, 24.39, 339.14, N'Order Complete', 648842;
+GO
+EXECUTE UpdateRentalOrder 4, N'Needs Repair', N'Full',      6229,	165, N'12/16/2022',	3,	34.95, 104.85,	7.70,  8.07, 112.92, N'Order Complete', 147930;
+GO
+EXECUTE UpdateRentalOrder 3, N'Excellent',    N'1/2 Tank',  8412,	206, N'12/19/2022',	2,	28.95,	57.90,	7.70,  4.46,  62.36, N'Order Complete', 802808;
+GO
+EXECUTE UpdateRentalOrder 5, N'Driveable',    N'Full',      3806,	147, N'12/19/2022',	2,	38.95, 	77.90,	7.70,  6.00,  83.90, N'Order Complete', 283649;
+GO
+
+SELECT ALL * FROM Employees;
+GO
+
+SELECT ALL * FROM Categories;
+GO
+
+SELECT ALL * FROM Cars;
+GO
+
+SELECT ALL * FROM RentalOrders;
+GO
+
+EXECUTE GetRentalProcessor N'29268';
+GO
+
+SELECT ALL * FROM RentStarts;
+GO
+
+SELECT ALL * FROM RentalsCompleted;
+GO
